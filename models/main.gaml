@@ -74,11 +74,36 @@ global {
 }
 
 species building {
+	int level <- 1;
     float height;
     string type;
     int capacity;
     list<inhabitant> residents;
     float total_revenue <- 0.0;
+    
+    bool is_upgrade <- false;
+    date upgrade_time;
+    float upgrade_cost <- (shape.area * 500 * level);
+    
+    action start_upgrade {
+    	if (type = "factory" and !is_upgrade and city_budget >= upgrade_cost) {
+    		city_budget <- city_budget - upgrade_cost;
+    		is_upgrade <- true;
+    		upgrade_time <- current_date + 5#day;
+    		write "Factory " + name + " is upgrading to level " + (level + 1);
+    	} else {
+    		write "You need $" + upgrade_cost + " to upgrade factory " + name;
+    	}
+    }
+    
+    reflex check_upgrade_finished when: is_upgrade {
+        if (current_date >= upgrade_time) {
+            is_upgrade <- false;
+            level <- level + 1;
+            capacity <- capacity + 5; 
+            write "Factory " + name + " upgraded to level " + level + ". Capacity increased!";
+        }
+    }
     
     reflex pay_taxes when: type = "factory" and current_date.hour = 0 and current_date.minute = 0 {
         float tax_amount <- total_revenue * factory_tax_rate;
@@ -96,8 +121,13 @@ species building {
 
     aspect default {
         rgb b_color <- #gray;
-        if (self = hover_building) { b_color <- #white; }
-        else {          
+        if (self = hover_building) { 
+        	b_color <- #white;
+        }
+        
+        if (is_upgrade) {
+        	b_color <- #brown;
+        } else {          
             switch type {
                 match "bank" { b_color <- #yellow; }
                 match "factory" { b_color <- #orange; }
@@ -105,7 +135,12 @@ species building {
             }
         }
         draw shape color: b_color border: #black;
+        
+	    if (type = "factory" and level > 1) {
+	            draw "LVL " + level at: location + {0,0,height+2} color: #white size: 10;
+        }
     }
+    
 }
 
 species road {
@@ -125,7 +160,7 @@ species road {
     		construction_end_time <- current_date + 1#day;
     		write "Road " + road +"upgrade in progress. Expected completion date: " + string(construction_end_time);
     	} else {
-    		write upgrade_cost;
+    		write "You need $" + upgrade_cost + " to upgrade road " + name;
     	}
     }
     
@@ -140,26 +175,26 @@ species road {
     }
     
     aspect default {
-    rgb road_color;
-    
-    if (is_under_construction) {
-        road_color <- #brown;
-    } else if (self = selected_road) { 
-        road_color <- #purple;
-    } else if (self = hover_road) {
-        road_color <- #blue;
-    } else {
-        float traffic_ratio <- (1 - (speed_rate / level)); 
-        road_color <- blend(#red, #pink, max(0.0, min(1.0, traffic_ratio)));
-    }
-    
-    float display_width <- (1 + level + 2 * (1 - min(1.0, speed_rate/level)));
-    draw (shape buffer display_width) color: road_color;
-    
-    if (level > 1 and !is_under_construction) {
-        draw "L" + level at: location color: #white size: 8;
-    }
-}
+	    rgb road_color;
+	    
+	    if (is_under_construction) {
+	        road_color <- #brown;
+	    } else if (self = selected_road) { 
+	        road_color <- #purple;
+	    } else if (self = hover_road) {
+	        road_color <- #blue;
+	    } else {
+	        float traffic_ratio <- (1 - (speed_rate / level)); 
+	        road_color <- blend(#red, #pink, max(0.0, min(1.0, traffic_ratio)));
+	    }
+	    
+	    float display_width <- (1 + level + 2 * (1 - min(1.0, speed_rate/level)));
+	    draw (shape buffer display_width) color: road_color;
+	    
+	    if (level > 1 and !is_under_construction) {
+	        draw "L" + level at: location color: #white size: 8;
+	    }
+	}
 }
 
 species inhabitant skills: [moving] {
@@ -177,18 +212,28 @@ species inhabitant skills: [moving] {
     
     reflex earn_money when: status = "working" and (current_hour >= 8 and current_hour < 17) {
         if (location overlaps workplace.shape) {
-            money <- money + (salary_per_hour / 60);
-            ask workplace {
-                total_revenue <- total_revenue + 25.0;
-            }
+            float effective_salary <- salary_per_hour * (1 + (workplace.level - 1) * 0.5); 
+	        money <- money + (effective_salary / 60);
+	        
+	        ask workplace {
+	            total_revenue <- total_revenue + 25.0;
+	        }
         }
     }
     
     reflex schedule {
         if (current_hour >= 8 and current_hour < 17) {
             if (status != "working") {
-                target <- any_location_in(workplace);
-                status <- "working";
+            	if (!workplace.is_upgrade) {            		
+	                target <- any_location_in(workplace);
+	                status <- "working";
+            	} else {
+            		building destination <- one_of(building where (each.type = "market" or each.type = "bank"));
+                    if (destination != nil) {
+                        target <- any_location_in(destination);
+                        status <- "moving_free";
+                    }
+            	}
             }
         } else if (current_hour >= 22 or current_hour < 6) {
             if (status != "resting") {
@@ -216,7 +261,6 @@ species inhabitant skills: [moving] {
 
 experiment project type: gui {
     parameter "Factory Tax Rate" var: factory_tax_rate category: "Policy";
-    parameter "Salary per Hour" var: salary_per_hour category: "Policy";
     parameter "Daily Material Cost" var: daily_material_cost min: 0.0 max: 5000000.0;
     
     output {
@@ -244,9 +288,12 @@ experiment project type: gui {
 					}
 					
 					building b <- building closest_to m_pos;
-					if (b != nil and (b distance_to m_pos < 10.0)) {
+					if (b != nil and (b distance_to m_pos < 10.0) and b.type = "factory") {
 						hover_building <- b;
-						write "Current revenue: $" + string(b.total_revenue, "#.##");
+						ask b {
+							do start_upgrade;
+						}
+//						write "Current revenue: $" + string(b.total_revenue, "#.##");
 					} else {
 						hover_building <- nil;
 					}
@@ -269,7 +316,7 @@ experiment project type: gui {
                     }
                     
                     building b <- building closest_to m_pos;
-                    if (b != nil and (b distance_to m_pos < 10.0)) {
+                    if (b != nil and (b distance_to m_pos < 10.0) and b.type = "factory") {
                     	hover_building <- b;
                     } else {
                     	hover_building <- nil;
@@ -277,17 +324,72 @@ experiment project type: gui {
                 }
             }
             
-            overlay position: {20#px, 20#px} size: {250#px, 350#px} background: #white transparency: 0.2 {
-                draw "CITY STATS" at: {20#px, 30#px} color: #black font: font("Arial", 16, #bold);
-                draw "Date: " + string(current_date, "DD/MM/YYYY") at: {20#px, 60#px} color: #black;
-                draw "Time: " + string(current_date, "HH:mm") at: {20#px, 90#px} color: #black;
-                draw "City Budget: $" + string(city_budget, "#.##") at: {20#px, 120#px} color: #darkblue;
-                
-                draw "LEGEND" at: {20#px, 170#px} color: #black font: font("Arial", 14, #bold);
-                draw square(10#px) at: {30#px, 200#px} color: #orange; draw "Factory" at: {50#px, 235#px} color: #black;
-                draw square(10#px) at: {30#px, 230#px} color: #yellow; draw "Bank" at: {50#px, 265#px} color: #black;
-                draw square(10#px) at: {30#px, 260#px} color: #cyan; draw "Market" at: {50#px, 295#px} color: #black;
-            }
+            overlay position: {20#px, 20#px} size: {280#px, 450#px} background: #gray transparency: 0.2 border: #white {
+			    float margin <- 20#px;
+			    float y <- 30#px;
+			
+			    draw "CITY DASHBOARD" at: {margin, y} color: #white font: font("Arial", 18, #bold);
+			    y <- y + 10#px;
+			    draw line([{margin, y}, {260#px, y}]) color: #gray;
+			    
+			    y <- y + 30#px;
+			    draw string(current_date, "dd/MM/yyyy") at: {margin, y} color: #lightgray font: font("Arial", 12);
+			    draw string(current_date, "HH:mm") at: {200#px, y} color: #cyan font: font("Arial", 14, #bold);
+			    
+			    y <- y + 30#px;
+			    draw "City Budget: $" + string(city_budget, "#.##") at: {20#px, y} color: #springgreen;
+			    
+			    y <- y + 40#px;
+			    draw "FACILITY TYPES" at: {margin, y} color: #cyan font: font("Arial", 11, #bold);
+			    y <- y + 5#px;
+			    draw line([{margin, y}, {150#px, y}]) color: #cyan;
+			    
+			    y <- y + 25#px;
+			    draw rectangle(12#px, 12#px) at: {margin + 6#px, y} color: #orange; 
+			    draw "Factory" at: {margin + 25#px, y + 5#px} color: #white font: font("Arial", 11);
+			    
+			    draw rectangle(12#px, 12#px) at: {margin + 120#px, y} color: #yellow; 
+			    draw "Bank" at: {margin + 140#px, y + 5#px} color: #white font: font("Arial", 11);
+			    
+			    y <- y + 25#px;
+			    draw rectangle(12#px, 12#px) at: {margin + 6#px, y} color: #cyan; 
+			    draw "Market" at: {margin + 25#px, y + 5#px} color: #white font: font("Arial", 11);
+			    
+			    draw rectangle(12#px, 12#px) at: {margin + 120#px, y} color: #gray; 
+			    draw "Home" at: {margin + 140#px, y + 5#px} color: #white font: font("Arial", 11);
+			
+			    y <- y + 50#px;
+			    
+			    if (hover_building != nil or hover_road != nil) {
+			        draw rectangle(240#px, 130#px) at: {140#px, y + 40#px} color: rgb(50, 50, 50, 150) border: #cyan;
+			        
+			        if (hover_building != nil) {
+					    draw "BUILDING: " + hover_building.type at: {margin + 10#px, y + 15#px} color: #cyan font: font("Arial", 12, #bold);
+					    
+					    draw "Level: " + hover_building.level at: {margin + 10#px, y + 35#px} color: #white font: font("Arial", 10);
+					    draw "Area: " + string(hover_building.shape.area, "#") + " m²" at: {margin + 10#px, y + 55#px} color: #white font: font("Arial", 10);
+					    
+					    draw "Revenue: $" + string(hover_building.total_revenue, "#.##") at: {margin + 10#px, y + 75#px} color: #yellow font: font("Arial", 10);
+					    
+					    if (hover_building.is_upgrade) {
+					        draw "STATUS: UPGRADING..." at: {margin + 10#px, y + 90#px} color: #springgreen font: font("Arial", 11, #italic);
+					    } else {
+					        draw "Next Upgrade: $" + string(hover_building.upgrade_cost, "#.##") at: {margin + 10#px, y + 90#px} color: #cyan font: font("Arial", 10, #bold);
+					    }
+					} else if (hover_road != nil) {
+			            draw "ROAD SECTOR" at: {margin + 10#px, y + 20#px} color: #cyan font: font("Arial", 12, #bold);
+			            draw "Current Level: " + hover_road.level at: {margin + 10#px, y + 45#px} color: #white;
+			            
+			            if (hover_road.is_under_construction) {
+			                draw "STATUS: WORK IN PROGRESS" at: {margin + 10#px, y + 70#px} color: #springgreen;
+			            } else {
+			                draw "Upgrade: $" + string(hover_road.upgrade_cost, "#.##") at: {margin + 10#px, y + 70#px} color: #cyan;
+			            }
+			        }
+			    } else {
+			        draw "Select a building or road" at: {margin, y + 20#px} color: #gray font: font("Arial", 11, #italic);
+			    }
+			}
         }
     }
 }
