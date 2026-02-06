@@ -19,6 +19,7 @@ global {
     // =================================================================
     float factory_tax_rate <- 0.15;  // 15% tax on factory revenue
     float salary_per_hour <- 12.0;    // Base hourly wage for workers
+    float total_goods_produced update: building where (each.type = "factory") sum_of (each.goods); // Total amount of goods currently available in all factories
 
     // =================================================================
     // SPATIAL DATA
@@ -72,14 +73,15 @@ global {
 		new_weight <- road as_map (each::(each.shape.perimeter / each.speed_rate));
     }
     
-    reflex calculate_daily_gdp when: current_date.hour = 23 and current_date.minute = 59 { 
-		gdp_previous <- gdp_current; 
+    reflex calculate_daily_gdp when: (current_date.hour = 23 and current_date.minute = 59) {
+		gdp_previous <- gdp_current;
 		
-		float total_wages <- inhabitant sum_of (each.money); 
-		float factory_production <- building where (each.type = "factory") sum_of (each.total_revenue); 
-		float infrastructure_investment <- road where (each.is_under_construction) sum_of (each.upgrade_cost); 
-		
-		gdp_current <- total_wages + factory_production + infrastructure_investment + city_budget; 
+		float total_wages <- inhabitant sum_of (each.money);
+		float factory_production <- building where (each.type = "factory") sum_of (each.total_revenue);
+		float infrastructure_investment <- road where (each.is_under_construction) sum_of (each.upgrade_cost);
+		float total_capital <- city_budget + private_investment;
+				
+		gdp_current <- total_wages + factory_production + infrastructure_investment + total_capital;
 		
 		if (gdp_previous > 0) {
 			gdp_growth_rate <- ((gdp_current - gdp_previous) / gdp_previous) * 100;
@@ -87,8 +89,7 @@ global {
 		
 		add gdp_current to: gdp_history;
 		
-		write "Economic Report of the Date " + string(current_date, "dd/MM") + ": GDP = $" + string(gdp_current, "#.##") + " (Growth: " + string(gdp_growth_rate, "#.#") + "%)";
-		
+		write "📊 GDP Report " + string(current_date, "dd/MM") + ": $" + string(gdp_current, "#.##") + " [Gov: $" + string(city_budget, "#") + " | Private Inv: $" + string(private_investment, "#") + "]";
 	}
 		    
     // =================================================================
@@ -237,9 +238,6 @@ species building {
 
     aspect default {
         rgb b_color <- #gray;
-        if (self = hover_building) { 
-        	b_color <- #white;
-        }
         
         if (in_debt) {
             b_color <- #red;  // Factory in debt (15+ days unpaid)
@@ -252,6 +250,11 @@ species building {
                 match "market" { b_color <- #cyan; }
             }
         }
+        
+        if (self = hover_building) { 
+        	b_color <- #blue;
+        }
+        
         draw shape color: b_color border: #black;
         
 	    if (type = "factory" and level > 1) {
@@ -615,7 +618,7 @@ experiment project type: gui {
                 }
             }
             
-            overlay position: {20#px, 20#px} size: {280#px, 450#px} background: #gray transparency: 0.2 border: #white {
+            overlay position: {20#px, 20#px} size: {280#px, 470#px} background: #gray transparency: 0.2 border: #white {
 			    float margin <- 20#px;
 			    float y <- 30#px;
 			
@@ -661,6 +664,9 @@ experiment project type: gui {
 				y <- y + 18#px;
 				rgb growth_color <- (world.gdp_growth_rate >= 0) ? #springgreen : #red;
 				draw "Growth: " + string(world.gdp_growth_rate, "#.#") + "%" at: {margin, y} color: growth_color font: font("Arial", 10);
+				
+				y <- y + 25#px;
+				draw "Total Goods: " + string(world.total_goods_produced, "#") + " units" at: {margin, y} color: #springgreen font: font("Arial", 11, #bold);
 			
 			    y <- y + 50#px;
 			    
@@ -704,5 +710,11 @@ experiment project type: gui {
 		        data "Gross Domestic Product" value: gdp_current color: #cyan;
 		    }
 		}
+		
+		display Production_Analysis {
+	        chart "Factory Goods Inventory" type: series background: #black color: #white {
+	            data "Total Goods in City" value: total_goods_produced color: #springgreen;
+	        }
+	    }
     }
 }
