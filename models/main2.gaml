@@ -57,7 +57,7 @@ global {
 		create road from: split_lines(shapefile_roads);
 		road_network <- as_edge_graph(road);
 		create building from: shapefile_buildings with: (height: int(read("HEIGHT")));
-		list<building> sorted_buildings <- (building where (each.shape.area > 9000)) sort_by (-each.shape.area);
+		list<building> sorted_buildings <- (building where (each.shape.area > 8500)) sort_by (-each.shape.area);
 		ask 8 among sorted_buildings {
 			type <- "factory";
 		}
