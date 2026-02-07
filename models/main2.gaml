@@ -13,6 +13,11 @@ global {
     float gdp_previous <- 0.0;
     float gdp_growth_rate <- 0.0;
     
+    // GDP flow tracking (cumulative)
+    float total_wages_paid <- 0.0;  // Cumulative wages paid by factories
+    float total_govt_spending <- 0.0;  // Cumulative government spending on infrastructure
+    float total_private_spending <- 0.0;  // Cumulative private investment spending
+    
     list<float> gdp_history <- [];
     // =================================================================
     // ECONOMIC PARAMETERS
@@ -76,12 +81,8 @@ global {
     reflex calculate_daily_gdp when: (current_date.hour = 23 and current_date.minute = 59) {
 		gdp_previous <- gdp_current;
 		
-		float total_wages <- inhabitant sum_of (each.money);
-		float factory_production <- building where (each.type = "factory") sum_of (each.total_revenue);
-		float infrastructure_investment <- road where (each.is_under_construction) sum_of (each.upgrade_cost);
-		float total_capital <- city_budget + private_investment;
-				
-		gdp_current <- total_wages + factory_production + infrastructure_investment + total_capital;
+		// GDP = Sum of all economic flows (wages paid + government spending + private investment)
+		gdp_current <- total_wages_paid + total_govt_spending + total_private_spending;
 		
 		if (gdp_previous > 0) {
 			gdp_growth_rate <- ((gdp_current - gdp_previous) / gdp_previous) * 100;
@@ -89,7 +90,7 @@ global {
 		
 		add gdp_current to: gdp_history;
 		
-		write "📊 GDP Report " + string(current_date, "dd/MM") + ": $" + string(gdp_current, "#.##") + " [Gov: $" + string(city_budget, "#") + " | Private Inv: $" + string(private_investment, "#") + "]";
+		write "📊 GDP Report " + string(current_date, "dd/MM") + ": $" + string(gdp_current, "#.##") + " [Wages: $" + string(total_wages_paid, "#") + " | Gov: $" + string(total_govt_spending, "#") + " | Private: $" + string(total_private_spending, "#") + "]";
 	}
 		    
     // =================================================================
@@ -139,9 +140,9 @@ global {
         // Give factories initial revenue to cover ~30 days of operations
         ask building where (each.type = "factory") {
             int num_workers <- length(inhabitant where (each.workplace = self));
-            // Varied initial capital: 15-30 days of payroll + materials
+            // Varied initial capital: 15-30 days of payroll (material costs removed)
             int days_capital <- rnd(15, 30);
-            float initial_capital <- (num_workers * 9 * salary_per_hour * days_capital) + (daily_material_cost * days_capital);
+            float initial_capital <- (num_workers * 9 * salary_per_hour * days_capital);
             total_revenue <- initial_capital;
             
             // Initial goods inventory: 200k-400k units per factory (enough for immediate road upgrades)
@@ -200,13 +201,14 @@ species building {
         total_revenue <- total_revenue - tax_amount;
     }
     
-    reflex operate_factory when: type = "factory" and current_date.hour = 23 and current_date.minute = 0 {
-        total_revenue <- total_revenue - daily_material_cost;
-        if (total_revenue < 0) { 
-        	total_revenue <- 0.0;
-        }
-		write "Factory " + name + " after deducting material costs: $" + daily_material_cost;
-    }
+    // Material cost deduction removed - no longer deducting from factory revenue
+    // reflex operate_factory when: type = "factory" and current_date.hour = 23 and current_date.minute = 0 {
+    //     total_revenue <- total_revenue - daily_material_cost;
+    //     if (total_revenue < 0) { 
+    //     	total_revenue <- 0.0;
+    //     }
+	// 	write "Factory " + name + " after deducting material costs: $" + daily_material_cost;
+    // }
     
     // Daily payroll for factory workers
     reflex pay_workers when: type = "factory" and current_date.hour = 17 and current_date.minute = 0 {
@@ -224,6 +226,7 @@ species building {
                 money <- money + daily_salary;
             }
             total_revenue <- total_revenue - daily_payroll;
+            total_wages_paid <- total_wages_paid + daily_payroll;  // Track GDP flow
             days_without_payment <- 0;  // Reset counter
             in_debt <- false;
         } else {
@@ -336,8 +339,13 @@ species road {
     	city_budget <- city_budget - govt_payment + profit_tax;  // Deduct govt share, add profit tax
     	private_investment <- private_investment - private_payment;  // Deduct private share
     	
+    	// Track GDP flows (government + private spending)
+    	total_govt_spending <- total_govt_spending + govt_payment;
+    	total_private_spending <- total_private_spending + private_payment;
+    	
     	ask factory {
-    		goods <- goods - myself.material_cost;  // Deduct materials from factory
+    		// Goods are NOT deducted - they accumulate to show economic production
+    		// goods <- goods - myself.material_cost;  // REMOVED: goods now accumulate
     		total_revenue <- total_revenue + factory_net_revenue;  // Factory gets net payment
     	}
     	is_under_construction <- true;
