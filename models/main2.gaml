@@ -7,7 +7,7 @@
 model main
 
 global {
-	int initial_road_level <- 4;
+	int initial_road_level <- 1;
 	float gdp_current <- 0.0;
 	float gdp_previous <- 0.0;
 	float gdp_growth_rate <- 0.0;
@@ -33,7 +33,6 @@ global {
 	float total_budget update: city_budget + private_investment;
 	float total_money_inhabitants update: inhabitant sum_of (each.money);
 	float total_factory_revenue update: building where (each.type = "factory") sum_of (each.total_revenue);
-	float daily_material_cost <- 500000.0;
 	float step <- 1 #mn;
 	date starting_date <- date([2024, 1, 1, 7, 0, 0]);
 	int current_hour update: current_date.hour;
@@ -51,7 +50,7 @@ global {
 
 		add gdp_current to: gdp_history;
 		write
-		"📊 GDP Report " + string(current_date, "dd/MM") + ": $" + string(gdp_current, "#.##") + " [Wages: $" + string(total_wages_paid, "#") + " | Gov: $" + string(total_govt_spending, "#") + " | Private: $" + string(total_private_spending, "#") + "]";
+		"GDP Report " + string(current_date, "dd/MM") + ": $" + string(gdp_current, "#.##") + " [Wages: $" + string(total_wages_paid, "#") + " | Gov: $" + string(total_govt_spending, "#") + " | Private: $" + string(total_private_spending, "#") + "]";
 	}
 
 	init {
@@ -217,18 +216,18 @@ species road {
 	action start_upgrade {
 		if (!is_under_construction and !waiting_to_upgrade) {
 			if (total_budget >= upgrade_cost) {
-				write "💰 Budget OK ($" + upgrade_cost + "). Material needed: " + material_cost + " units. Select a factory...";
+				write "Budget OK ($" + upgrade_cost + "). Material needed: " + material_cost + " units. Select a factory...";
 				return true;
 			} else {
-				write "❌ Insufficient budget! Need $" + upgrade_cost + " (have $" + total_budget + ")";
+				write "Insufficient budget! Need $" + upgrade_cost + " (have $" + total_budget + ")";
 				return false;
 			}
 
 		} else if (waiting_to_upgrade) {
-			write "⏳ Road upgrade already pending - waiting for drivers to leave (" + nb_drivers + " remaining)";
+			write "Road upgrade already pending - waiting for drivers to leave (" + nb_drivers + " remaining)";
 			return false;
 		} else {
-			write "🚧 Road is already under construction";
+			write "Road is already under construction";
 			return false;
 		}
 
@@ -236,7 +235,7 @@ species road {
 
 	action confirm_upgrade_with_factory (building factory) {
 		if (factory.goods < material_cost) {
-			write "❌ Factory " + factory.name + " only has " + factory.goods + " goods (need " + material_cost + ")";
+			write "Factory " + factory.name + " only has " + factory.goods + " goods (need " + material_cost + ")";
 			return;
 		}
 
@@ -246,7 +245,7 @@ species road {
 		float private_payment <- min(private_share, private_investment);
 		float total_available <- govt_payment + private_payment;
 		if (total_available < upgrade_cost) {
-			write "❌ Insufficient total budget! Need $" + upgrade_cost + " (have $" + total_available + ")";
+			write "Insufficient total budget! Need $" + upgrade_cost + " (have $" + total_available + ")";
 			return;
 		}
 
@@ -269,7 +268,7 @@ species road {
 
 		is_under_construction <- true;
 		construction_end_time <- current_date + 1 #day;
-		write "🚧 Road upgrade started! Govt: $" + govt_payment + " + Private: $" + private_payment + ". Factory " + factory.name + " paid $" + factory_net_revenue;
+		write "Road upgrade started! Govt: $" + govt_payment + " + Private: $" + private_payment + ". Factory " + factory.name + " paid $" + factory_net_revenue;
 	}
 
 	reflex start_upgrade_when_clear when: waiting_to_upgrade {
@@ -278,7 +277,7 @@ species road {
 			waiting_to_upgrade <- false;
 			is_under_construction <- true;
 			construction_end_time <- current_date + 1 #day;
-			write "✅ Road cleared! Construction starting now. Expected completion: " + string(construction_end_time);
+			write "Road cleared! Construction starting now. Expected completion: " + string(construction_end_time);
 		}
 
 	}
@@ -288,7 +287,7 @@ species road {
 			is_under_construction <- false;
 			level <- level + 1;
 			capacity <- (1 + shape.perimeter / 30) * 2 ^ (level - 1);
-			write "🎉 Road upgrade complete! New level: " + level + " | Capacity increased!";
+			write "Road upgrade complete! New level: " + level + " | Capacity increased!";
 			is_under_construction <- false;
 		}
 
@@ -433,8 +432,11 @@ species inhabitant skills: [moving] {
 
 experiment project type: gui {
 	parameter "Initial Road Level" var: initial_road_level min: 1 max: 10 category: "Infrastructure";
+	parameter "Road level" var: initial_road_level min: 1 max: 10 category: "Infrastructure";
 	parameter "Factory Tax Rate" var: factory_tax_rate category: "Policy";
-	parameter "Daily Material Cost" var: daily_material_cost min: 0.0 max: 5000000.0;
+	parameter "Salary Per Hour" var: salary_per_hour category: "Policy";
+	parameter "City Budget" var: city_budget;
+	parameter "Private Investment" var: private_investment;
 	output {
 		display map type: 3d axes: false background: #black {
 			species building aspect: default;
@@ -455,7 +457,7 @@ experiment project type: gui {
 							selected_road <- nil;
 							selected_factory <- nil;
 						} else {
-							write "❌ Road upgrade cancelled. Click a road to start again.";
+							write "Road upgrade cancelled. Click a road to start again.";
 							selected_road <- nil;
 							waiting_for_factory_selection <- false;
 						}
@@ -471,7 +473,7 @@ experiment project type: gui {
 
 							if (can_proceed) {
 								waiting_for_factory_selection <- true;
-								write "🏭 Now select a factory to provide materials for this road upgrade...";
+								write "Now select a factory to provide materials for this road upgrade...";
 							} else {
 								selected_road <- nil;
 							}
